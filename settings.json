@@ -40,7 +40,7 @@
 
     "auto-rejoin": {
       "enabled": true,
-      "leaveAfter": 50,
+      "leaveAfter": 600,
       "rejoinAfter": 5
     },
 
