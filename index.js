@@ -2,18 +2,16 @@ const mineflayer = require('mineflayer');
 const Movements = require('mineflayer-pathfinder').Movements;
 const pathfinder = require('mineflayer-pathfinder').pathfinder;
 const { GoalBlock } = require('mineflayer-pathfinder').goals;
-
 const config = require('./settings.json');
 const express = require('express');
-
 const app = express();
 
 app.get('/', (req, res) => {
-  res.send('Bot is arrived')
+  res.send('Bot is running');
 });
 
 app.listen(8000, () => {
-  console.log('server started');
+  console.log('Server started on port 8000');
 });
 
 function createBot() {
@@ -32,97 +30,66 @@ function createBot() {
    bot.settings.colorsEnabled = false;
 
    bot.once('spawn', () => {
-      console.log('\x1b[33m[AfkBot] Bot joined to the server', '\x1b[0m');
+      console.log('\x1b[33m[AfkBot] Bot joined the server\x1b[0m');
 
       if (config.utils['auto-auth'].enabled) {
          console.log('[INFO] Started auto-auth module');
-
-         var password = config.utils['auto-auth'].password;
          setTimeout(() => {
-            bot.chat(`/register ${password} ${password}`);
-            bot.chat(`/login ${password}`);
+            bot.chat(`/register ${config.utils['auto-auth'].password} ${config.utils['auto-auth'].password}`);
+            bot.chat(`/login ${config.utils['auto-auth'].password}`);
          }, 500);
-
-         console.log(`[Auth] Authentification commands executed.`);
       }
 
       if (config.utils['chat-messages'].enabled) {
          console.log('[INFO] Started chat-messages module');
-         var messages = config.utils['chat-messages']['messages'];
-
+         let messages = config.utils['chat-messages'].messages;
          if (config.utils['chat-messages'].repeat) {
-            var delay = config.utils['chat-messages']['repeat-delay'];
+            let delay = config.utils['chat-messages']['repeat-delay'] * 1000;
             let i = 0;
-
-            let msg_timer = setInterval(() => {
-               bot.chat(`${messages[i]}`);
-
-               if (i + 1 == messages.length) {
-                  i = 0;
-               } else i++;
-            }, delay * 1000);
+            setInterval(() => {
+               bot.chat(messages[i]);
+               i = (i + 1) % messages.length;
+            }, delay);
          } else {
-            messages.forEach((msg) => {
-               bot.chat(msg);
-            });
+            messages.forEach(msg => bot.chat(msg));
          }
       }
 
-      const pos = config.position;
-
       if (config.position.enabled) {
-         console.log(
-            `\x1b[32m[Afk Bot] Starting moving to target location (${pos.x}, ${pos.y}, ${pos.z})\x1b[0m`
-         );
+         console.log(`\x1b[32m[AfkBot] Moving to (${config.position.x}, ${config.position.y}, ${config.position.z})\x1b[0m`);
          bot.pathfinder.setMovements(defaultMove);
-         bot.pathfinder.setGoal(new GoalBlock(pos.x, pos.y, pos.z));
+         bot.pathfinder.setGoal(new GoalBlock(config.position.x, config.position.y, config.position.z));
       }
 
       if (config.utils['anti-afk'].enabled) {
          bot.setControlState('jump', true);
-         if (config.utils['anti-afk'].sneak) {
-            bot.setControlState('sneak', true);
-         }
+         if (config.utils['anti-afk'].sneak) bot.setControlState('sneak', true);
       }
-   });
 
-   bot.on('chat', (username, message) => {
-      if (config.utils['chat-log']) {
-         console.log(`[ChatLog] <${username}> ${message}`);
+      if (config.utils['auto-rejoin'].enabled) {
+         setTimeout(() => {
+            console.log('\x1b[33m[AfkBot] Leaving server for rejoin...\x1b[0m');
+            bot.quit();
+         }, config.utils['auto-rejoin'].leaveAfter * 1000);
       }
    });
 
    bot.on('goal_reached', () => {
-      console.log(
-         `\x1b[32m[AfkBot] Bot arrived to target location. ${bot.entity.position}\x1b[0m`
-      );
+      console.log(`\x1b[32m[AfkBot] Reached target location.\x1b[0m`);
    });
 
    bot.on('death', () => {
-      console.log(
-         `\x1b[33m[AfkBot] Bot has been died and was respawned ${bot.entity.position}`,
-         '\x1b[0m'
-      );
+      console.log('\x1b[33m[AfkBot] Bot died and respawned.\x1b[0m');
    });
 
-   if (config.utils['auto-reconnect']) {
-      bot.on('end', () => {
-         setTimeout(() => {
-            createBot();
-         }, config.utils['auto-recconect-delay']);
-      });
-   }
+   bot.on('end', () => {
+      if (config.utils['auto-rejoin'].enabled) {
+         setTimeout(createBot, config.utils['auto-rejoin'].rejoinAfter * 1000);
+      }
+   });
 
-   bot.on('kicked', (reason) =>
-      console.log(
-         '\x1b[33m',
-         `[AfkBot] Bot was kicked from the server. Reason: \n${reason}`,
-         '\x1b[0m'
-      )
-   );
-   bot.on('error', (err) =>
-      console.log(`\x1b[31m[ERROR] ${err.message}`, '\x1b[0m')
-   );
+   bot.on('kicked', (reason) => console.log(`\x1b[33m[AfkBot] Kicked: ${reason}\x1b[0m`));
+   bot.on('error', (err) => console.log(`\x1b[31m[ERROR] ${err.message}\x1b[0m`));
 }
 
 createBot();

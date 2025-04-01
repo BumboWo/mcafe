@@ -39,6 +39,12 @@
       ]
     },
 
+    "auto-rejoin": {
+      "enabled": true,
+      "leaveAfter": 50,  // Time (in seconds) before the bot leaves
+      "rejoinAfter": 5   // Time (in seconds) before the bot rejoins
+    },
+
     "chat-log": true,
     "auto-reconnect": true,
     "auto-recconect-delay": 1000
