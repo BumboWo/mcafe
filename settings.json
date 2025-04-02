@@ -45,12 +45,6 @@
       ]
     },
 
-    "auto-rejoin": {
-      "enabled": false,
-      "leaveAfter": 600,  
-      "rejoinAfter": 10    
-    },
-
     "chat-log": true,
     "auto-reconnect": true,
     "auto-reconnect-delay": 5000
