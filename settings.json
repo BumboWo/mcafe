@@ -46,7 +46,7 @@
     },
 
     "auto-rejoin": {
-      "enabled": true,
+      "enabled": false,
       "leaveAfter": 600,  
       "rejoinAfter": 10    
     },
