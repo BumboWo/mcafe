@@ -48,7 +48,7 @@
     "auto-rejoin": {
       "enabled": true,
       "leaveAfter": 600,  // Each bot stays online for 10 minutes before leaving
-      "rejoinAfter": 5    // Bot waits 5 seconds before reconnecting
+      "rejoinAfter": 1    // Bot waits 5 seconds before reconnecting
     },
 
     "chat-log": true,
