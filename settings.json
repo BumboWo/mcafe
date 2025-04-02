@@ -1,9 +1,16 @@
 {
-  "bot-account": {
-    "username": "theLIFESOUL",
-    "password": "",
-    "type": "mojang"
-  },
+  "bot-accounts": [
+    {
+      "username": "theLIFESOUL",
+      "password": "",
+      "type": "mojang"
+    },
+    {
+      "username": "alsoLIFESOUL",
+      "password": "",
+      "type": "mojang"
+    }
+  ],
 
   "server": {
     "ip": "emerald.magmanode.com",
@@ -40,12 +47,12 @@
 
     "auto-rejoin": {
       "enabled": true,
-      "leaveAfter": 600,
-      "rejoinAfter": 5
+      "leaveAfter": 600,  // Each bot stays online for 10 minutes before leaving
+      "rejoinAfter": 5    // Bot waits 5 seconds before reconnecting
     },
 
     "chat-log": true,
     "auto-reconnect": true,
-    "auto-reconnect-delay": 5000
+    "auto-reconnect-delay": 2000
   }
 }
