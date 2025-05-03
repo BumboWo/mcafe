@@ -1,52 +1,36 @@
-const mineflayer = require('mineflayer');
-const { pathfinder, Movements, goals: { GoalBlock } } = require('mineflayer-pathfinder');
-const mcDataLoader = require('minecraft-data');
-const express = require('express');
-const config = require('./settings.json');
-const app = express();
-
-process.on('uncaughtException', err => {
-  console.error('[FATAL ERROR]', err);
-});
-process.on('unhandledRejection', err => {
-  console.error('[UNHANDLED PROMISE]', err);
-});
-
-const activeBots = {}; // ip:port => [bots]
-
-app.get('/', (req, res) => {
-  res.send('Bot dispatcher running.');
-});
-
 app.get('/dispatch', async (req, res) => {
   const ip = req.query.ip;
   const port = parseInt(req.query.port) || 25565;
+  const user1 = req.query.user1;
+  const user2 = req.query.user2;
   const key = `${ip}:${port}`;
 
   if (!ip) return res.status(400).send('Missing ?ip= parameter.');
   if (activeBots[key]) return res.send(`Bots already running on ${key}`);
 
-  console.log(`[DISPATCH] Spawning 2 bots to ${key}`);
+  console.log(`[DISPATCH] Spawning bots to ${key}`);
   activeBots[key] = [];
 
-  for (let i = 0; i < 2; i++) {
-    if (!config['bot-accounts'][i]) {
-      console.warn(`[WARN] No bot config for index ${i}. Skipping.`);
-      continue;
-    }
+  spawnBot(ip, port, 0, key, user1);
+  spawnBot(ip, port, 1, key, user2);
 
-    spawnBot(ip, port, i, key);
-  }
-
-  res.send(`Dispatched 2 bots to ${key}`);
+  res.send(`Dispatched 2 bots to ${key}${user1 || user2 ? ' with custom usernames.' : ''}`);
 });
 
-function spawnBot(ip, port, botIndex, key) {
+function spawnBot(ip, port, botIndex, key, overrideUsername) {
   const botConfig = config["bot-accounts"][botIndex];
+
+  if (!botConfig && !overrideUsername) {
+    console.warn(`[WARN] No bot config or override for index ${botIndex}. Skipping.`);
+    return;
+  }
+
+  const username = overrideUsername || botConfig.username;
+
   const bot = mineflayer.createBot({
-    username: botConfig.username,
-    password: botConfig.password,
-    auth: botConfig.type,
+    username,
+    password: overrideUsername ? undefined : botConfig.password,
+    auth: overrideUsername ? 'offline' : botConfig.type,
     host: ip,
     port,
     version: config.server.version || false,
@@ -60,12 +44,13 @@ function spawnBot(ip, port, botIndex, key) {
   bot.settings.colorsEnabled = false;
 
   bot.once('spawn', () => {
-    console.log(`\x1b[33m[Bot ${botIndex + 1}] Joined ${key}\x1b[0m`);
+    console.log(`\x1b[33m[Bot ${botIndex + 1}] (${username}) joined ${key}\x1b[0m`);
 
     if (config.utils['auto-auth'].enabled) {
       setTimeout(() => {
-        bot.chat(`/register ${config.utils['auto-auth'].password} ${config.utils['auto-auth'].password}`);
-        bot.chat(`/login ${config.utils['auto-auth'].password}`);
+        const pwd = config.utils['auto-auth'].password;
+        bot.chat(`/register ${pwd} ${pwd}`);
+        bot.chat(`/login ${pwd}`);
       }, 500);
     }
 
@@ -103,19 +88,15 @@ function spawnBot(ip, port, botIndex, key) {
   });
 
   bot.on('end', () => {
-    console.log(`\x1b[31m[Bot ${botIndex + 1}] Disconnected from ${key}. Reconnecting...\x1b[0m`);
-    setTimeout(() => spawnBot(ip, port, botIndex, key), config.utils['auto-reconnect-delay']);
+    console.log(`\x1b[31m[Bot ${botIndex + 1}] (${username}) Disconnected from ${key}. Reconnecting...\x1b[0m`);
+    setTimeout(() => spawnBot(ip, port, botIndex, key, overrideUsername), config.utils['auto-reconnect-delay']);
   });
 
   bot.on('kicked', reason => {
-    console.warn(`\x1b[33m[Bot ${botIndex + 1}] Kicked from ${key}: ${reason}\x1b[0m`);
+    console.warn(`\x1b[33m[Bot ${botIndex + 1}] (${username}) Kicked: ${reason}\x1b[0m`);
   });
 
   bot.on('error', err => {
-    console.error(`\x1b[31m[ERROR] [Bot ${botIndex + 1}] ${err.message}\x1b[0m`);
+    console.error(`\x1b[31m[ERROR] [Bot ${botIndex + 1}] (${username}) ${err.message}\x1b[0m`);
   });
 }
-
-app.listen(8000, () => {
-  console.log('Server started on port 8000');
-});
