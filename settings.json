@@ -13,8 +13,8 @@
   ],
 
   "server": {
-    "ip": "emerald.magmanode.com",
-    "port": 31976,
+    "ip": "gold.magmanode.com",
+    "port": 27458,
     "version": "1.12.1"
   },
 
