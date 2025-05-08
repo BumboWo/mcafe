@@ -1,7 +1,7 @@
 {
   "bot-accounts": [
     {
-      "username": "MrSisterFister",
+      "username": "shadowDoomee",
       "password": "",
       "type": "mojang"
     },
@@ -33,11 +33,11 @@
 
     "anti-afk": {
       "enabled": true,
-      "sneak": true
+      "sneak": false
     },
 
     "chat-messages": {
-      "enabled": false,
+      "enabled": true,
       "repeat": false,
       "repeat-delay": 60,
       "messages": [
