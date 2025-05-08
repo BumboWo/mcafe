@@ -1,12 +1,12 @@
 {
   "bot-accounts": [
     {
-      "username": "mrSisterFister",
+      "username": "MrSisterFister",
       "password": "",
       "type": "mojang"
     },
     {
-      "username": "MrBallsacTwister",
+      "username": "mrBallsacTwister",
       "password": "",
       "type": "mojang"
     }
@@ -37,7 +37,7 @@
     },
 
     "chat-messages": {
-      "enabled": true,
+      "enabled": false,
       "repeat": false,
       "repeat-delay": 60,
       "messages": [
