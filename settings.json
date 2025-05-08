@@ -1,12 +1,12 @@
 {
   "bot-accounts": [
     {
-      "username": "theLIFESOUL",
+      "username": "mrSisterFister",
       "password": "",
       "type": "mojang"
     },
     {
-      "username": "alsoLIFESOUL",
+      "username": "mrBallsacTwister",
       "password": "",
       "type": "mojang"
     }
@@ -41,7 +41,7 @@
       "repeat": false,
       "repeat-delay": 60,
       "messages": [
-        "/login bottedlmfao"
+        "/login bottedlmfao",
       ]
     },
 
