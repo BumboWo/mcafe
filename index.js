@@ -43,24 +43,41 @@ app.get('/dispatch', async (req, res) => {
 
 function spawnBot(ip, port, botIndex, key) {
   const botConfig = config["bot-accounts"][botIndex];
+  const version = config.server.version || false;
+
+  console.log(`\n[INIT] Starting Bot ${botIndex + 1}`);
+  console.log(`- Username: ${botConfig.username}`);
+  console.log(`- Server: ${ip}:${port}`);
+  console.log(`- Requested Version: ${version}\n`);
+
   const bot = mineflayer.createBot({
     username: botConfig.username,
     password: botConfig.password,
     auth: botConfig.type,
     host: ip,
     port,
-    version: config.server.version || false,
+    version,
   });
 
   activeBots[key].push(bot);
 
   bot.loadPlugin(pathfinder);
-  const mcData = mcDataLoader(bot.version);
-  const defaultMove = new Movements(bot, mcData);
-  bot.settings.colorsEnabled = false;
 
   bot.once('spawn', () => {
-    console.log(`\x1b[33m[Bot ${botIndex + 1}] Joined ${key}\x1b[0m`);
+    console.log(`\x1b[32m[Bot ${botIndex + 1}] Spawned successfully on ${key}\x1b[0m`);
+    console.log(`- Detected Minecraft Version: ${bot.version}`);
+    try {
+      const mcData = mcDataLoader(bot.version);
+      console.log(`- Protocol Version: ${mcData.version?.version || 'unknown'}`);
+      const defaultMove = new Movements(bot, mcData);
+      bot.pathfinder.setMovements(defaultMove);
+
+      if (config.position.enabled) {
+        bot.pathfinder.setGoal(new GoalBlock(config.position.x, config.position.y, config.position.z));
+      }
+    } catch (err) {
+      console.error(`[FATAL] Failed to load minecraft-data for version ${bot.version}:`, err.message);
+    }
 
     if (config.utils['auto-auth'].enabled) {
       setTimeout(() => {
@@ -83,11 +100,6 @@ function spawnBot(ip, port, botIndex, key) {
       }
     }
 
-    if (config.position.enabled) {
-      bot.pathfinder.setMovements(defaultMove);
-      bot.pathfinder.setGoal(new GoalBlock(config.position.x, config.position.y, config.position.z));
-    }
-
     if (config.utils['anti-afk'].enabled) {
       bot.setControlState('jump', true);
       if (config.utils['anti-afk'].sneak) bot.setControlState('sneak', true);
@@ -95,11 +107,11 @@ function spawnBot(ip, port, botIndex, key) {
   });
 
   bot.on('goal_reached', () => {
-    console.log(`\x1b[32m[Bot ${botIndex + 1}] Reached destination on ${key}.\x1b[0m`);
+    console.log(`\x1b[32m[Bot ${botIndex + 1}] Reached goal on ${key}\x1b[0m`);
   });
 
   bot.on('death', () => {
-    console.log(`\x1b[33m[Bot ${botIndex + 1}] Died on ${key}.\x1b[0m`);
+    console.log(`\x1b[33m[Bot ${botIndex + 1}] Died on ${key}\x1b[0m`);
   });
 
   bot.on('end', () => {
@@ -114,8 +126,13 @@ function spawnBot(ip, port, botIndex, key) {
   bot.on('error', err => {
     console.error(`\x1b[31m[ERROR] [Bot ${botIndex + 1}] ${err.message}\x1b[0m`);
   });
-}
 
-app.listen(8000, () => {
-  console.log('Server started on port 8000');
-});
+  // Low-level protocol errors
+  bot._client.on('error', (err) => {
+    console.error(`\x1b[31m[PROTOCOL ERROR] Bot ${botIndex + 1}: ${err.message}\x1b[0m`);
+  });
+
+  bot._client.on('disconnect', (packet) => {
+    console.warn(`\x1b[33m[PROTOCOL DISCONNECT] Bot ${botIndex + 1}:`, packet);
+  });
+}
