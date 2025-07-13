@@ -12,10 +12,10 @@ process.on('unhandledRejection', err => {
   console.error('[UNHANDLED PROMISE]', err);
 });
 
-const activeBots = {}; // ip:port => [bots]
+const activeBots = {}; // key: ip:port => array of bots
 
 app.get('/', (req, res) => {
-  res.send('Bot dispatcher running.');
+  res.send('Bot dispatcher is running.');
 });
 
 app.get('/dispatch', async (req, res) => {
@@ -26,7 +26,7 @@ app.get('/dispatch', async (req, res) => {
   if (!ip) return res.status(400).send('Missing ?ip= parameter.');
   if (activeBots[key]) return res.send(`Bots already running on ${key}`);
 
-  console.log(`[DISPATCH] Spawning 2 bots to ${key}`);
+  console.log(`\n[DISPATCH] Spawning 2 bots to ${key}`);
   activeBots[key] = [];
 
   for (let i = 0; i < 2; i++) {
@@ -48,7 +48,7 @@ function spawnBot(ip, port, botIndex, key) {
   console.log(`\n[INIT] Starting Bot ${botIndex + 1}`);
   console.log(`- Username: ${botConfig.username}`);
   console.log(`- Server: ${ip}:${port}`);
-  console.log(`- Requested Version: ${version}\n`);
+  console.log(`- Requested Version: ${version}`);
 
   const bot = mineflayer.createBot({
     username: botConfig.username,
@@ -64,25 +64,30 @@ function spawnBot(ip, port, botIndex, key) {
   bot.loadPlugin(pathfinder);
 
   bot.once('spawn', () => {
-    console.log(`\x1b[32m[Bot ${botIndex + 1}] Spawned successfully on ${key}\x1b[0m`);
-    console.log(`- Detected Minecraft Version: ${bot.version}`);
-    try {
-      const mcData = mcDataLoader(bot.version);
-      console.log(`- Protocol Version: ${mcData.version?.version || 'unknown'}`);
-      const defaultMove = new Movements(bot, mcData);
-      bot.pathfinder.setMovements(defaultMove);
+    console.log(`\x1b[32m[Bot ${botIndex + 1}] Spawned on ${key}\x1b[0m`);
+    console.log(`- Actual Minecraft Version: ${bot.version}`);
 
-      if (config.position.enabled) {
-        bot.pathfinder.setGoal(new GoalBlock(config.position.x, config.position.y, config.position.z));
-      }
+    let mcData;
+    try {
+      mcData = mcDataLoader(bot.version);
+      console.log(`- Protocol Version: ${mcData.version?.version || 'unknown'}`);
     } catch (err) {
-      console.error(`[FATAL] Failed to load minecraft-data for version ${bot.version}:`, err.message);
+      console.error(`[FATAL] Failed to load minecraft-data for version ${bot.version}: ${err.message}`);
+      return;
+    }
+
+    const defaultMove = new Movements(bot, mcData);
+    bot.pathfinder.setMovements(defaultMove);
+
+    if (config.position.enabled) {
+      bot.pathfinder.setGoal(new GoalBlock(config.position.x, config.position.y, config.position.z));
     }
 
     if (config.utils['auto-auth'].enabled) {
       setTimeout(() => {
-        bot.chat(`/register ${config.utils['auto-auth'].password} ${config.utils['auto-auth'].password}`);
-        bot.chat(`/login ${config.utils['auto-auth'].password}`);
+        const pwd = config.utils['auto-auth'].password;
+        bot.chat(`/register ${pwd} ${pwd}`);
+        bot.chat(`/login ${pwd}`);
       }, 500);
     }
 
@@ -127,7 +132,7 @@ function spawnBot(ip, port, botIndex, key) {
     console.error(`\x1b[31m[ERROR] [Bot ${botIndex + 1}] ${err.message}\x1b[0m`);
   });
 
-  // Low-level protocol errors
+  // Deep protocol debugging
   bot._client.on('error', (err) => {
     console.error(`\x1b[31m[PROTOCOL ERROR] Bot ${botIndex + 1}: ${err.message}\x1b[0m`);
   });
@@ -136,3 +141,7 @@ function spawnBot(ip, port, botIndex, key) {
     console.warn(`\x1b[33m[PROTOCOL DISCONNECT] Bot ${botIndex + 1}:`, packet);
   });
 }
+
+app.listen(8000, () => {
+  console.log('Server started on port 8000');
+});
