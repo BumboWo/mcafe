@@ -1,12 +1,12 @@
 {
   "bot-accounts": [
     {
-      "username": "bumboBot69422",
+      "username": "soulBound_To_TheBlackPearl",
       "password": "",
       "type": "mojang"
     },
     {
-      "username": "bumboBot69420",
+      "username": "the_BlackPearl",
       "password": "",
       "type": "mojang"
     }
@@ -37,7 +37,7 @@
     },
 
     "chat-messages": {
-      "enabled": true,
+      "enabled": false,
       "repeat": false,
       "repeat-delay": 60,
       "messages": [
