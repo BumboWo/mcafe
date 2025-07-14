@@ -2,146 +2,136 @@ const mineflayer = require('mineflayer');
 const { pathfinder, Movements, goals: { GoalBlock } } = require('mineflayer-pathfinder');
 const mcDataLoader = require('minecraft-data');
 const express = require('express');
-const config = require('./settings.json');
-const app = express();
 
-process.on('uncaughtException', err => {
-  console.error('[FATAL ERROR]', err);
-});
-process.on('unhandledRejection', err => {
-  console.error('[UNHANDLED PROMISE]', err);
-});
+const app = express();
+app.use(express.json());
 
 const activeBots = {}; // key: ip:port => array of bots
 
-app.get('/', (req, res) => {
-  res.send('Bot dispatcher is running.');
-});
+process.on('uncaughtException', err => console.error('[FATAL]', err));
+process.on('unhandledRejection', err => console.error('[UNHANDLED]', err));
 
-app.get('/dispatch', async (req, res) => {
-  const ip = req.query.ip;
-  const port = parseInt(req.query.port) || 25565;
-  const key = `${ip}:${port}`;
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
-  if (!ip) return res.status(400).send('Missing ?ip= parameter.');
-  if (activeBots[key]) return res.send(`Bots already running on ${key}`);
+app.get('/', (req, res) => res.send('Bot dispatcher is running.'));
 
-  console.log(`\n[DISPATCH] Spawning 2 bots to ${key}`);
-  activeBots[key] = [];
-
-  for (let i = 0; i < 2; i++) {
-    if (!config['bot-accounts'][i]) {
-      console.warn(`[WARN] No bot config for index ${i}. Skipping.`);
-      continue;
-    }
-
-    spawnBot(ip, port, i, key);
+app.post('/dispatch', async (req, res) => {
+  const { ip, port = 25565, version = false, bots } = req.body;
+  if (!ip || !Array.isArray(bots)) {
+    return res.status(400).send('Missing required fields: ip, bots[]');
   }
 
-  res.send(`Dispatched 2 bots to ${key}`);
+  const key = `${ip}:${port}`;
+  if (activeBots[key]) return res.send(`Bots already running on ${key}`);
+
+  console.log(`\n[DISPATCH] Spawning ${bots.length} bots to ${key}`);
+  activeBots[key] = [];
+
+  bots.forEach((botData, i) => spawnBot(ip, port, version, botData, key, i));
+  res.send(`Dispatched ${bots.length} bots to ${key}`);
 });
 
-function spawnBot(ip, port, botIndex, key) {
-  const botConfig = config["bot-accounts"][botIndex];
-  const version = config.server.version || false;
-
-  console.log(`\n[INIT] Starting Bot ${botIndex + 1}`);
-  console.log(`- Username: ${botConfig.username}`);
-  console.log(`- Server: ${ip}:${port}`);
-  console.log(`- Requested Version: ${version}`);
-
+function spawnBot(ip, port, version, botData, key, index) {
   const bot = mineflayer.createBot({
-    username: botConfig.username,
-    password: botConfig.password,
-    auth: botConfig.type,
+    username: botData.username || `Bot_${index}_${Date.now()}`,
+    auth: botData.auth || 'offline',
     host: ip,
     port,
-    version,
+    version
   });
 
   activeBots[key].push(bot);
-
   bot.loadPlugin(pathfinder);
 
   bot.once('spawn', () => {
-    console.log(`\x1b[32m[Bot ${botIndex + 1}] Spawned on ${key}\x1b[0m`);
-    console.log(`- Actual Minecraft Version: ${bot.version}`);
+    console.log(`\x1b[32m[Bot ${index + 1}] Spawned (${bot.username}) on ${key}\x1b[0m`);
+    console.log(` - Minecraft version: ${bot.version}`);
 
     let mcData;
     try {
       mcData = mcDataLoader(bot.version);
-      console.log(`- Protocol Version: ${mcData.version?.version || 'unknown'}`);
-    } catch (err) {
-      console.error(`[FATAL] Failed to load minecraft-data for version ${bot.version}: ${err.message}`);
+    } catch (e) {
+      console.error(`[FATAL] minecraft-data failed for version ${bot.version}: ${e.message}`);
       return;
     }
 
     const defaultMove = new Movements(bot, mcData);
     bot.pathfinder.setMovements(defaultMove);
 
-    if (config.position.enabled) {
-      bot.pathfinder.setGoal(new GoalBlock(config.position.x, config.position.y, config.position.z));
+    // Movement goal
+    if (botData.goalPosition) {
+      const { x, y, z } = botData.goalPosition;
+      bot.pathfinder.setGoal(new GoalBlock(x, y, z));
     }
 
-    if (config.utils['auto-auth'].enabled) {
-      setTimeout(() => {
-        const pwd = config.utils['auto-auth'].password;
-        bot.chat(`/register ${pwd} ${pwd}`);
-        bot.chat(`/login ${pwd}`);
-      }, 500);
+    // Chat command loop
+    if (Array.isArray(botData.commands) && botData.commands.length > 0) {
+      const loop = botData.loop ?? true;
+      const runCommands = async () => {
+        for (let cmd of botData.commands) {
+          if (cmd.delay) await wait(cmd.delay * 1000);
+          if (cmd.text) bot.chat(cmd.text);
+        }
+        if (loop) runCommands();
+      };
+      runCommands();
     }
 
-    if (config.utils['chat-messages'].enabled) {
-      const messages = config.utils['chat-messages'].messages;
-      const delay = config.utils['chat-messages']['repeat-delay'] * 1000;
-      if (config.utils['chat-messages'].repeat) {
-        let i = 0;
-        setInterval(() => {
-          bot.chat(messages[i]);
-          i = (i + 1) % messages.length;
-        }, delay);
-      } else {
-        messages.forEach(msg => bot.chat(msg));
-      }
+    // Anti-AFK
+    if (botData.antiAfk?.enabled) {
+      if (botData.antiAfk.jump) bot.setControlState('jump', true);
+      if (botData.antiAfk.sneak) bot.setControlState('sneak', true);
     }
 
-    if (config.utils['anti-afk'].enabled) {
-      bot.setControlState('jump', true);
-      if (config.utils['anti-afk'].sneak) bot.setControlState('sneak', true);
+    // Snippets
+    if (Array.isArray(botData.snippets)) {
+      botData.snippets.forEach(snippet => {
+        if (snippet.type === 'autoRestart') {
+          const interval = (snippet.intervalMinutes || 30) * 60 * 1000;
+          setInterval(async () => {
+            bot.chat(snippet.warningMessage || '/say Restarting soon...');
+            await wait(10000);
+            bot.chat(snippet.restartCommand || '/restart');
+          }, interval);
+        }
+      });
+    }
+
+    // Heartbeat
+    if (botData.heartbeat?.command) {
+      const interval = (botData.heartbeat.intervalSeconds || 60) * 1000;
+      const sendChatHeartbeat = () => {
+        bot.chat(botData.heartbeat.command);
+        console.log(`[Heartbeat] (${bot.username}) Sent: ${botData.heartbeat.command}`);
+      };
+      sendChatHeartbeat();
+      const hbInterval = setInterval(sendChatHeartbeat, interval);
+      bot.once('end', () => clearInterval(hbInterval));
     }
   });
 
   bot.on('goal_reached', () => {
-    console.log(`\x1b[32m[Bot ${botIndex + 1}] Reached goal on ${key}\x1b[0m`);
+    console.log(`\x1b[34m[Bot ${index + 1}] Reached goal on ${key}\x1b[0m`);
   });
 
   bot.on('death', () => {
-    console.log(`\x1b[33m[Bot ${botIndex + 1}] Died on ${key}\x1b[0m`);
+    console.log(`\x1b[33m[Bot ${index + 1}] Died on ${key}\x1b[0m`);
   });
 
   bot.on('end', () => {
-    console.log(`\x1b[31m[Bot ${botIndex + 1}] Disconnected from ${key}. Reconnecting...\x1b[0m`);
-    setTimeout(() => spawnBot(ip, port, botIndex, key), config.utils['auto-reconnect-delay']);
+    console.log(`\x1b[31m[Bot ${index + 1}] Disconnected. Reconnecting...\x1b[0m`);
+    setTimeout(() => spawnBot(ip, port, version, botData, key, index), 5000);
   });
 
   bot.on('kicked', reason => {
-    console.warn(`\x1b[33m[Bot ${botIndex + 1}] Kicked from ${key}: ${reason}\x1b[0m`);
+    console.warn(`\x1b[33m[Bot ${index + 1}] Kicked: ${reason}\x1b[0m`);
   });
 
   bot.on('error', err => {
-    console.error(`\x1b[31m[ERROR] [Bot ${botIndex + 1}] ${err.message}\x1b[0m`);
-  });
-
-  // Deep protocol debugging
-  bot._client.on('error', (err) => {
-    console.error(`\x1b[31m[PROTOCOL ERROR] Bot ${botIndex + 1}: ${err.message}\x1b[0m`);
-  });
-
-  bot._client.on('disconnect', (packet) => {
-    console.warn(`\x1b[33m[PROTOCOL DISCONNECT] Bot ${botIndex + 1}:`, packet);
+    console.error(`\x1b[31m[Bot ${index + 1}] Error: ${err.message}\x1b[0m`);
   });
 }
 
-app.listen(8000, () => {
-  console.log('Server started on port 8000');
-});
+app.listen(8000, () => console.log('Server started on port 8000'));
