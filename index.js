@@ -6,10 +6,7 @@ const express = require('express');
 const app = express();
 app.use(express.json());
 
-const activeBots = {}; // key: ip:port => array of bots
-
-process.on('uncaughtException', err => console.error('[FATAL]', err));
-process.on('unhandledRejection', err => console.error('[UNHANDLED]', err));
+const activeSessions = {}; // key: ip:port => [ { botInstance, botData, meta } ]
 
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -24,80 +21,84 @@ app.post('/dispatch', async (req, res) => {
   }
 
   const key = `${ip}:${port}`;
-  if (activeBots[key]) return res.send(`Bots already running on ${key}`);
+  if (activeSessions[key]) {
+    return res.send(`Bots already running on ${key}`);
+  }
 
   console.log(`\n[DISPATCH] Spawning ${bots.length} bots to ${key}`);
-  activeBots[key] = [];
+  activeSessions[key] = [];
 
-  bots.forEach((botData, i) => spawnBot(ip, port, version, botData, key, i));
+  bots.forEach((botData, index) => {
+    startBotSession(ip, port, version, botData, key, index);
+  });
+
   res.send(`Dispatched ${bots.length} bots to ${key}`);
 });
 
-function spawnBot(ip, port, version, botData, key, index) {
-  const botId = `${botData.username || `Bot_${index}_${Date.now()}`}_${Math.random().toString(36).slice(2, 6)}`;
+function startBotSession(ip, port, version, botData, key, index) {
+  const username = botData.username || `Bot_${index}_${Date.now()}`;
+  const session = { botInstance: null, botData, meta: { reconnecting: false, key, index, username, version, ip, port } };
+  activeSessions[key].push(session);
+  spawnBot(session);
+}
 
-  console.log(`\n[INIT] Starting bot #${index + 1} (${botId}) on ${key}`);
+function spawnBot(session) {
+  const { ip, port, version, username, index, key } = session.meta;
+  const botData = session.botData;
+
+  console.log(`\n[INIT] Spawning Bot ${index + 1} (${username}) on ${key}`);
 
   const bot = mineflayer.createBot({
-    username: botData.username || `Bot_${index}_${Date.now()}`,
+    username,
     auth: botData.auth || 'offline',
     host: ip,
     port,
     version
   });
 
-  bot.__botId = botId;
-  bot.__terminated = false;
-  activeBots[key] = activeBots[key] || [];
-  activeBots[key].push(bot);
-
+  session.botInstance = bot;
   bot.loadPlugin(pathfinder);
 
   bot.once('spawn', () => {
-    console.log(`\x1b[32m[Bot ${index + 1}] Spawned (${bot.username}) on ${key}\x1b[0m`);
-    console.log(` - Minecraft version: ${bot.version}`);
+    console.log(`\x1b[32m[Bot ${index + 1}] Spawned (${username}) on ${key}\x1b[0m`);
 
     let mcData;
     try {
       mcData = mcDataLoader(bot.version);
     } catch (e) {
-      console.error(`[FATAL] minecraft-data failed for version ${bot.version}: ${e.message}`);
+      console.error(`[FATAL] minecraft-data load failed for ${bot.version}: ${e.message}`);
       return;
     }
 
     const defaultMove = new Movements(bot, mcData);
     bot.pathfinder.setMovements(defaultMove);
 
-    // Movement goal
     if (botData.goalPosition) {
       const { x, y, z } = botData.goalPosition;
       bot.pathfinder.setGoal(new GoalBlock(x, y, z));
     }
 
-    // Chat command loop
-    if (Array.isArray(botData.commands) && botData.commands.length > 0) {
+    if (Array.isArray(botData.commands)) {
       const loop = botData.loop ?? true;
       const runCommands = async () => {
-        for (let cmd of botData.commands) {
+        for (const cmd of botData.commands) {
           if (cmd.delay) await wait(cmd.delay * 1000);
           if (cmd.text) bot.chat(cmd.text);
         }
-        if (loop && !bot.__terminated) runCommands();
+        if (loop) runCommands();
       };
       runCommands();
     }
 
-    // Anti-AFK
     if (botData.antiAfk?.enabled) {
       if (botData.antiAfk.jump) bot.setControlState('jump', true);
       if (botData.antiAfk.sneak) bot.setControlState('sneak', true);
     }
 
-    // Snippets
     if (Array.isArray(botData.snippets)) {
       botData.snippets.forEach(snippet => {
         if (snippet.type === 'autoRestart') {
-          const interval = (snippet.intervalMinutes || 30) * 60 * 1000;
+          const interval = (snippet.intervalMinutes || 30) * 60000;
           setInterval(async () => {
             bot.chat(snippet.warningMessage || '/say Restarting soon...');
             await wait(10000);
@@ -107,17 +108,14 @@ function spawnBot(ip, port, version, botData, key, index) {
       });
     }
 
-    // Heartbeat
     if (botData.heartbeat?.command) {
       const interval = (botData.heartbeat.intervalSeconds || 60) * 1000;
-      const sendChatHeartbeat = () => {
-        if (!bot.__terminated) {
-          bot.chat(botData.heartbeat.command);
-          console.log(`[Heartbeat] (${bot.username}) Sent: ${botData.heartbeat.command}`);
-        }
+      const sendHeartbeat = () => {
+        bot.chat(botData.heartbeat.command);
+        console.log(`[Heartbeat] ${username}: ${botData.heartbeat.command}`);
       };
-      sendChatHeartbeat();
-      const hbInterval = setInterval(sendChatHeartbeat, interval);
+      sendHeartbeat();
+      const hbInterval = setInterval(sendHeartbeat, interval);
       bot.once('end', () => clearInterval(hbInterval));
     }
   });
@@ -130,44 +128,47 @@ function spawnBot(ip, port, version, botData, key, index) {
     console.log(`\x1b[33m[Bot ${index + 1}] Died on ${key}\x1b[0m`);
   });
 
-  bot.on('end', () => {
-    console.log(`\x1b[31m[Bot ${index + 1}] Disconnected from ${key}\x1b[0m`);
-
-    // Remove from active list
-    activeBots[key] = (activeBots[key] || []).filter(b => b !== bot);
-    if (activeBots[key].length === 0) delete activeBots[key];
-
-    // Skip reconnect if intentionally terminated
-    if (bot.__terminated) {
-      console.log(`\x1b[33m[Bot ${index + 1}] Terminated. Will not reconnect.\x1b[0m`);
-      return;
-    }
-
-    console.log(`\x1b[36m[Bot ${index + 1}] Reconnecting in 5s...\x1b[0m`);
-    setTimeout(() => spawnBot(ip, port, version, botData, key, index), 5000);
-  });
-
   bot.on('kicked', reason => {
     const reasonStr = typeof reason === 'string' ? reason : JSON.stringify(reason);
-    console.warn(`\x1b[33m[Bot ${index + 1}] Kicked: ${reasonStr}\x1b[0m`);
+    console.warn(`\x1b[33m[Bot ${index + 1}] Kicked from ${key}: ${reasonStr}\x1b[0m`);
 
     if (reasonStr.toLowerCase().includes("hammered")) {
-      bot.__terminated = true;
-      console.log(`\x1b[31m[Bot ${index + 1}] Terminated due to 'hammered'.\x1b[0m`);
+      console.log(`[Bot ${index + 1}] Terminated due to 'hammered' kick reason.`);
+      destroySession(key, bot);
+    } else {
+      scheduleReconnect(session);
     }
+  });
+
+  bot.on('end', () => {
+    console.log(`\x1b[31m[Bot ${index + 1}] Disconnected from ${key}\x1b[0m`);
+    scheduleReconnect(session);
   });
 
   bot.on('error', err => {
     console.error(`\x1b[31m[Bot ${index + 1}] Error: ${err.message}\x1b[0m`);
   });
+}
 
-  // Timeout to detect login failure
+function scheduleReconnect(session) {
+  if (session.meta.reconnecting) return;
+  session.meta.reconnecting = true;
+
+  const { key, botInstance } = session;
+  destroySession(key, botInstance);
+
+  console.log(`[RECONNECT] Scheduling reconnect for Bot ${session.meta.index + 1}...`);
   setTimeout(() => {
-    if (bot.state !== 'spawned' && !bot.__terminated) {
-      console.warn(`\x1b[33m[Bot ${index + 1}] Stuck during login, forcing reconnect.\x1b[0m`);
-      bot.quit();
-    }
-  }, 15000);
+    session.meta.reconnecting = false;
+    spawnBot(session);
+  }, 5000);
+}
+
+function destroySession(key, botInstance) {
+  if (!activeSessions[key]) return;
+  activeSessions[key] = activeSessions[key].filter(s => s.botInstance !== botInstance);
+  if (activeSessions[key].length === 0) delete activeSessions[key];
+  botInstance.removeAllListeners();
 }
 
 app.listen(8000, () => console.log('Server started on port 8000'));
