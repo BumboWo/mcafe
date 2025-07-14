@@ -126,7 +126,22 @@ function spawnBot(ip, port, version, botData, key, index) {
   });
 
   bot.on('kicked', reason => {
-    console.warn(`\x1b[33m[Bot ${index + 1}] Kicked: ${reason}\x1b[0m`);
+    const reasonStr = typeof reason === 'string' ? reason : JSON.stringify(reason);
+    console.warn(`\x1b[33m[Bot ${index + 1}] Kicked: ${reasonStr}\x1b[0m`);
+  
+    if (reasonStr.toLowerCase().includes("hammered")) {
+      console.log(`\x1b[31m[Bot ${index + 1}] Kick reason matched "hammered". Terminating session.\x1b[0m`);
+      
+      // Remove bot from activeBots list
+      activeBots[key] = activeBots[key].filter(b => b !== bot);
+      if (activeBots[key].length === 0) delete activeBots[key];
+  
+      bot.removeAllListeners();
+      return;
+    }
+  
+    // If not "hammered", still reconnect
+    setTimeout(() => spawnBot(ip, port, version, botData, key, index), 5000);
   });
 
   bot.on('error', err => {
