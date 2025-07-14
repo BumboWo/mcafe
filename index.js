@@ -6,8 +6,7 @@ const express = require('express');
 const app = express();
 app.use(express.json());
 
-const activeBots = {};       // key: "ip:port" => array of active bots
-const reconnectFlags = {};   // key: "ip:port" => { [index]: boolean }
+const activeBots = {}; // key: ip:port => array of bots
 
 process.on('uncaughtException', err => console.error('[FATAL]', err));
 process.on('unhandledRejection', err => console.error('[UNHANDLED]', err));
@@ -29,18 +28,15 @@ app.post('/dispatch', async (req, res) => {
 
   console.log(`\n[DISPATCH] Spawning ${bots.length} bots to ${key}`);
   activeBots[key] = [];
-  reconnectFlags[key] = {};
 
   bots.forEach((botData, i) => spawnBot(ip, port, version, botData, key, i));
   res.send(`Dispatched ${bots.length} bots to ${key}`);
 });
 
 function spawnBot(ip, port, version, botData, key, index) {
-  if (reconnectFlags[key]?.[index]) {
-    console.log(`[Bot ${index + 1}] Reconnect already in progress for ${key}, skipping.`);
-    return;
-  }
-  reconnectFlags[key][index] = true;
+  const botId = `${botData.username || `Bot_${index}_${Date.now()}`}_${Math.random().toString(36).slice(2, 6)}`;
+
+  console.log(`\n[INIT] Starting bot #${index + 1} (${botId}) on ${key}`);
 
   const bot = mineflayer.createBot({
     username: botData.username || `Bot_${index}_${Date.now()}`,
@@ -50,13 +46,16 @@ function spawnBot(ip, port, version, botData, key, index) {
     version
   });
 
+  bot.__botId = botId;
+  bot.__terminated = false;
+  activeBots[key] = activeBots[key] || [];
   activeBots[key].push(bot);
+
   bot.loadPlugin(pathfinder);
 
   bot.once('spawn', () => {
     console.log(`\x1b[32m[Bot ${index + 1}] Spawned (${bot.username}) on ${key}\x1b[0m`);
     console.log(` - Minecraft version: ${bot.version}`);
-    reconnectFlags[key][index] = false;
 
     let mcData;
     try {
@@ -69,12 +68,13 @@ function spawnBot(ip, port, version, botData, key, index) {
     const defaultMove = new Movements(bot, mcData);
     bot.pathfinder.setMovements(defaultMove);
 
+    // Movement goal
     if (botData.goalPosition) {
       const { x, y, z } = botData.goalPosition;
       bot.pathfinder.setGoal(new GoalBlock(x, y, z));
     }
 
-    // Command loop
+    // Chat command loop
     if (Array.isArray(botData.commands) && botData.commands.length > 0) {
       const loop = botData.loop ?? true;
       const runCommands = async () => {
@@ -82,7 +82,7 @@ function spawnBot(ip, port, version, botData, key, index) {
           if (cmd.delay) await wait(cmd.delay * 1000);
           if (cmd.text) bot.chat(cmd.text);
         }
-        if (loop) runCommands();
+        if (loop && !bot.__terminated) runCommands();
       };
       runCommands();
     }
@@ -111,8 +111,10 @@ function spawnBot(ip, port, version, botData, key, index) {
     if (botData.heartbeat?.command) {
       const interval = (botData.heartbeat.intervalSeconds || 60) * 1000;
       const sendChatHeartbeat = () => {
-        bot.chat(botData.heartbeat.command);
-        console.log(`[Heartbeat] (${bot.username}) Sent: ${botData.heartbeat.command}`);
+        if (!bot.__terminated) {
+          bot.chat(botData.heartbeat.command);
+          console.log(`[Heartbeat] (${bot.username}) Sent: ${botData.heartbeat.command}`);
+        }
       };
       sendChatHeartbeat();
       const hbInterval = setInterval(sendChatHeartbeat, interval);
@@ -129,8 +131,20 @@ function spawnBot(ip, port, version, botData, key, index) {
   });
 
   bot.on('end', () => {
-    console.log(`\x1b[31m[Bot ${index + 1}] Disconnected from ${key}. Reconnecting...\x1b[0m`);
-    reconnectAndCleanup();
+    console.log(`\x1b[31m[Bot ${index + 1}] Disconnected from ${key}\x1b[0m`);
+
+    // Remove from active list
+    activeBots[key] = (activeBots[key] || []).filter(b => b !== bot);
+    if (activeBots[key].length === 0) delete activeBots[key];
+
+    // Skip reconnect if intentionally terminated
+    if (bot.__terminated) {
+      console.log(`\x1b[33m[Bot ${index + 1}] Terminated. Will not reconnect.\x1b[0m`);
+      return;
+    }
+
+    console.log(`\x1b[36m[Bot ${index + 1}] Reconnecting in 5s...\x1b[0m`);
+    setTimeout(() => spawnBot(ip, port, version, botData, key, index), 5000);
   });
 
   bot.on('kicked', reason => {
@@ -138,36 +152,22 @@ function spawnBot(ip, port, version, botData, key, index) {
     console.warn(`\x1b[33m[Bot ${index + 1}] Kicked: ${reasonStr}\x1b[0m`);
 
     if (reasonStr.toLowerCase().includes("hammered")) {
-      console.log(`\x1b[31m[Bot ${index + 1}] Kick reason matched "hammered". Terminating session.\x1b[0m`);
-      cleanupBot(bot, key, index);
-      return;
+      bot.__terminated = true;
+      console.log(`\x1b[31m[Bot ${index + 1}] Terminated due to 'hammered'.\x1b[0m`);
     }
-
-    reconnectAndCleanup();
   });
 
   bot.on('error', err => {
     console.error(`\x1b[31m[Bot ${index + 1}] Error: ${err.message}\x1b[0m`);
   });
 
-  function reconnectAndCleanup() {
-    activeBots[key] = activeBots[key].filter(b => b !== bot);
-    if (activeBots[key].length === 0) {
-      delete activeBots[key];
-      delete reconnectFlags[key];
+  // Timeout to detect login failure
+  setTimeout(() => {
+    if (bot.state !== 'spawned' && !bot.__terminated) {
+      console.warn(`\x1b[33m[Bot ${index + 1}] Stuck during login, forcing reconnect.\x1b[0m`);
+      bot.quit();
     }
-    setTimeout(() => spawnBot(ip, port, version, botData, key, index), 5000);
-  }
-
-  function cleanupBot(botInstance, key, index) {
-    activeBots[key] = activeBots[key].filter(b => b !== botInstance);
-    delete reconnectFlags[key][index];
-    if (activeBots[key].length === 0) {
-      delete activeBots[key];
-      delete reconnectFlags[key];
-    }
-    botInstance.removeAllListeners();
-  }
+  }, 15000);
 }
 
 app.listen(8000, () => console.log('Server started on port 8000'));
