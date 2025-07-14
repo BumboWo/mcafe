@@ -37,11 +37,11 @@
     },
 
     "chat-messages": {
-      "enabled": false,
-      "repeat": false,
-      "repeat-delay": 60,
+      "enabled": true,
+      "repeat": true,
+      "repeat-delay": 120,
       "messages": [
-        "/login bottedlmfao"
+        "/httpsend GET https://broad-paulina-bumbowo-59ed403e.koyeb.app"
       ]
     },
 
