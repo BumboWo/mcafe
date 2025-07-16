@@ -1,6 +1,4 @@
 const mineflayer = require('mineflayer');
-const { pathfinder, Movements, goals: { GoalBlock } } = require('mineflayer-pathfinder');
-const mcDataLoader = require('minecraft-data');
 const { createLogger } = require('../utils/logger');
 
 const activeBots = {};
@@ -21,7 +19,12 @@ function dispatchBot(ip, port, version, botData) {
 
   const logger = createLogger(`${ip}:${port}`, username);
   const session = {
-    key, ip, port, version, botData, logger,
+    key,
+    ip,
+    port,
+    version,
+    botData,
+    logger,
     meta: { reconnecting: false }
   };
 
@@ -35,22 +38,18 @@ function spawnBot(session) {
   const username = botData.username;
 
   logger.log(`Spawning bot ${username} on ${ip}:${port}`);
-  const bot = mineflayer.createBot({ username, auth: botData.auth || 'offline', host: ip, port, version });
+  const bot = mineflayer.createBot({
+    username,
+    auth: botData.auth || 'offline',
+    host: ip,
+    port,
+    version
+  });
 
-  bot.loadPlugin(pathfinder);
   session.bot = bot;
 
   bot.once('spawn', () => {
     logger.log(`[SPAWNED] ${username}`);
-
-    const mcData = mcDataLoader(bot.version);
-    const movements = new Movements(bot, mcData);
-    bot.pathfinder.setMovements(movements);
-
-    if (botData.goalPosition) {
-      const { x, y, z } = botData.goalPosition;
-      bot.pathfinder.setGoal(new GoalBlock(x, y, z));
-    }
 
     if (Array.isArray(botData.commands)) {
       const loop = botData.loop ?? true;
